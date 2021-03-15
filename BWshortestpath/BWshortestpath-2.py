@@ -105,10 +105,10 @@ class shortest_path(app_manager.RyuApp):
 		if self.net.has_node(pkt_ethernet.dst):
 			print("%s in self.net" % pkt_ethernet.dst)
 			path = nx.shortest_path(self.net, pkt_ethernet.src, pkt_ethernet.dst, weight='bw') #以当前bw作最短路径转发
-			next_match = ofp_parser.OFPMatch(eth_dst=pkt_ethernet.dst)
-			back_match = ofp_parser.OFPMatch(eth_dst=pkt_ethernet.src)
+			next_match = ofp_parser.OFPMatch(eth_dst=pkt_ethernet.dst,eth_src=pkt_ethernet.src)
+			back_match = ofp_parser.OFPMatch(eth_dst=pkt_ethernet.src,eth_src=pkt_ethernet.dst)
 			print(path)
-                        #依照计算后算出的路径下发流表
+			#依照计算后算出的路径下发流表
 			for on_path_switch in range(1, len(path)-1):
 				now_switch = path[on_path_switch] #这里需要知道现在，之前以及之后的switch
 				next_switch = path[on_path_switch+1]
@@ -134,7 +134,7 @@ class shortest_path(app_manager.RyuApp):
 			return
 		   
 
-        #获得拓扑信息
+	#获得拓扑信息
 	@set_ev_cls(event.EventSwitchEnter)
 	def get_topology_data(self, ev):
 		switch_list = get_switch(self.topology_api_app, None)
@@ -183,7 +183,7 @@ class shortest_path(app_manager.RyuApp):
 
 		dp.send_msg(out)
 	
-        #处理arp广播风暴，以dpid以及src-mac当作key，value为inport，若传进来的inport没被记录，则代表
+	#处理arp广播风暴，以dpid以及src-mac当作key，value为inport，若传进来的inport没被记录，则代表
 	#是会造成广播风暴的arp封包
 	def mac_learning(self,datapath,src,in_port):
 		self.mac_to_port.setdefault((datapath,datapath.id),{})
@@ -210,7 +210,7 @@ class shortest_path(app_manager.RyuApp):
 			time.sleep(1)
 
 	#获取回传的link信息
-        @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
+	@set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
 	def port_stats_event_handler(self, ev):
 
 		print("Handling port stats event")
@@ -230,7 +230,7 @@ class shortest_path(app_manager.RyuApp):
 
 			else:
 				delta_time = current_time - port_info["last_update"]
-                                #算出频宽
+				#算出频宽
 				port_info["rx_band"] = (stat.rx_bytes - port_info["rx_bytes"]) / delta_time
 				port_info["tx_band"] = (stat.tx_bytes - port_info["tx_bytes"]) / delta_time
 				port_info["rx_bytes"] = stat.rx_bytes
@@ -240,7 +240,7 @@ class shortest_path(app_manager.RyuApp):
 			dst_dpid = self.idport_to_id.get((dpid,port_no))
 
 			if dst_dpid != None:
-                                #记录link的频宽
+				#记录link的频宽
 				BW = port_info["rx_band"]+port_info["tx_band"]
 				self.net[dst_dpid][dpid]["bw"] = BW/1000000
 				self.net[dpid][dst_dpid]["bw"] = BW/1000000
