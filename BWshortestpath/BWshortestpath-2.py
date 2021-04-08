@@ -23,10 +23,10 @@ class shortest_path(app_manager.RyuApp):
 	def __init__(self, *args, **kwargs):
 		super(shortest_path, self).__init__(*args, **kwargs)
 		self.topology_api_app = self
-		self.net = nx.DiGraph()#创建图
-		self.switch_map = {}
-		self.mac_to_port = {}#用来记录
-		self.idport_to_id = {}#以dpid以及port去对应到这个link的另外一个dpid
+		self.net = nx.DiGraph()#創建圖
+		self.switch_map = {}#記錄dpid以及其對應的dp實體
+		self.mac_to_port = {}#用來記錄
+		self.idport_to_id = {}#以dpid以及其port去對應到屬於這個link的另外一個dpid，主要用處為將所測的BW放進net的圖裡 
 		self.port_infos = {}
 		hub.spawn(self.port_request_loop)
 	
@@ -36,11 +36,11 @@ class shortest_path(app_manager.RyuApp):
 		ofp = dp.ofproto
 		ofp_parser =dp.ofproto_parser
 
-		self.switch_map.update({dp.id: dp})#记录dpid以及其对应的dp实体 
+		self.switch_map.update({dp.id: dp}) 
 		match = ofp_parser.OFPMatch()
 		action = ofp_parser.OFPInstructionActions(ofp.OFPIT_APPLY_ACTIONS, [ofp_parser.OFPActionOutput(ofp.OFPP_CONTROLLER)])
 		inst=[action]
-		self.add_flow(dp=dp, match=match, inst=inst, table=0, priority=1)#下发flooding流表
+		self.add_flow(dp=dp, match=match, inst=inst, table=0, priority=1)#下發flooding流表(table miss)
 
 	
 	@set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
@@ -60,7 +60,7 @@ class shortest_path(app_manager.RyuApp):
 		if not pkt_ethernet:
 			return
 
-		# 过滤 LLDP packet
+		# 過濾 LLDP packet
 		if pkt_ethernet.ethertype == 35020:
 			return
 		if msg.buffer_id == ofp.OFP_NO_BUFFER:
@@ -69,13 +69,13 @@ class shortest_path(app_manager.RyuApp):
 
 		# arp封包处理
 		if pkt_ethernet.dst == 'ff:ff:ff:ff:ff:ff':
-			if self.mac_learning(dp,pkt_ethernet.src,port) is False: #判断是否会造成广播风暴
+			if self.mac_learning(dp,pkt_ethernet.src,port) is False: #判断是否会造成广播风暴，False代表為是會造成
 				out_port = ofp.OFPPC_NO_RECV #将封包丢掉
 			else:
 				out_port = ofp.OFPP_FLOOD #做flooding
-				if not self.net.has_node(pkt_ethernet.src):
+				if not self.net.has_node(pkt_ethernet.src): #若arp封包源沒有包含在圖裡面，則將它加入進圖中
 					self.net.add_node(pkt_ethernet.src)
-					self.net.add_edge(pkt_ethernet.src,dp.id,bw=0)
+					self.net.add_edge(pkt_ethernet.src,dp.id,bw=0) #添加雙向的邊
 					self.net.add_edge(dp.id,pkt_ethernet.src,port=port,bw=0)
 					self.idport_to_id.update({(dp.id,port):pkt_ethernet.src})
 					print(self.idport_to_id)
@@ -104,13 +104,13 @@ class shortest_path(app_manager.RyuApp):
 		
 		if self.net.has_node(pkt_ethernet.dst):
 			print("%s in self.net" % pkt_ethernet.dst)
-			path = nx.shortest_path(self.net, pkt_ethernet.src, pkt_ethernet.dst, weight='bw') #以当前bw作最短路径转发
+			path = nx.shortest_path(self.net, pkt_ethernet.src, pkt_ethernet.dst, weight='bw') #以当前bw作最短路徑轉發
 			next_match = ofp_parser.OFPMatch(eth_dst=pkt_ethernet.dst,eth_src=pkt_ethernet.src)
 			back_match = ofp_parser.OFPMatch(eth_dst=pkt_ethernet.src,eth_src=pkt_ethernet.dst)
 			print(path)
-			#依照计算后算出的路径下发流表
+			#依照計算后算出的路徑下發流表
 			for on_path_switch in range(1, len(path)-1):
-				now_switch = path[on_path_switch] #这里需要知道现在，之前以及之后的switch
+				now_switch = path[on_path_switch] #这里需要知道現在，之前以及之後的switch
 				next_switch = path[on_path_switch+1]
 				back_switch = path[on_path_switch-1]
 				next_port = self.net[now_switch][next_switch]['port']
@@ -134,13 +134,13 @@ class shortest_path(app_manager.RyuApp):
 			return
 		   
 
-	#获得拓扑信息
+	#獲得拓撲信息，初始化圖
 	@set_ev_cls(event.EventSwitchEnter)
 	def get_topology_data(self, ev):
 		switch_list = get_switch(self.topology_api_app, None)
 		switches =[switch.dp.id for switch in switch_list]
 		links_list = get_link(self.topology_api_app, None)
-		links=[(link.src.dpid,link.dst.dpid,{'port':link.src.port_no,'bw':0}) for link in links_list]
+		links=[(link.src.dpid,link.dst.dpid,{'port':link.src.port_no,'bw':0}) for link in links_list] 
 		self.net.add_nodes_from(switches)
 		self.net.add_edges_from(links)
 		print(self.net.nodes())
@@ -183,8 +183,8 @@ class shortest_path(app_manager.RyuApp):
 
 		dp.send_msg(out)
 	
-	#处理arp广播风暴，以dpid以及src-mac当作key，value为inport，若传进来的inport没被记录，则代表
-	#是会造成广播风暴的arp封包
+	#c處理arp廣播风暴，以dpid以及src-mac当作key，value为inport，若傳進来的inport没被記錄，则代表
+	#是会造成廣播风暴的arp封包
 	def mac_learning(self,datapath,src,in_port):
 		self.mac_to_port.setdefault((datapath,datapath.id),{})
 
@@ -207,9 +207,9 @@ class shortest_path(app_manager.RyuApp):
 				msg = parser.OFPPortStatsRequest(dp, 0, ofproto.OFPP_ANY)
 				dp.send_msg(msg)
 
-			time.sleep(1)
+			time.sleep(1) #每秒獲得信息
 
-	#获取回传的link信息
+	#獲取傳回的link信息
 	@set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
 	def port_stats_event_handler(self, ev):
 
@@ -219,7 +219,7 @@ class shortest_path(app_manager.RyuApp):
 			dpid = ev.msg.datapath.id
 			port_no = stat.port_no
 			name = "%X-%d" % (dpid, port_no, )
-			current_time = time.time() #记录现在时间
+			current_time = time.time() #記錄現在時間
 
 			self.port_infos.setdefault(name, {"last_update":current_time, "rx_bytes": 0, "tx_bytes": 0, "rx_band": 0, "tx_band": 0})
 			port_info = self.port_infos[name]
@@ -230,7 +230,7 @@ class shortest_path(app_manager.RyuApp):
 
 			else:
 				delta_time = current_time - port_info["last_update"]
-				#算出频宽
+				#算出频宽，注意單位是Mbyte
 				port_info["rx_band"] = (stat.rx_bytes - port_info["rx_bytes"]) / delta_time
 				port_info["tx_band"] = (stat.tx_bytes - port_info["tx_bytes"]) / delta_time
 				port_info["rx_bytes"] = stat.rx_bytes
@@ -240,7 +240,7 @@ class shortest_path(app_manager.RyuApp):
 			dst_dpid = self.idport_to_id.get((dpid,port_no))
 
 			if dst_dpid != None:
-				#记录link的频宽
+				#記錄link的頻寬
 				BW = port_info["rx_band"]+port_info["tx_band"]
 				self.net[dst_dpid][dpid]["bw"] = BW/1000000
 				self.net[dpid][dst_dpid]["bw"] = BW/1000000
