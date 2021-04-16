@@ -1,4 +1,3 @@
-
 import time
 from ryu.base import app_manager
 from ryu.controller import ofp_event
@@ -250,17 +249,17 @@ class shortest_path(app_manager.RyuApp):
                 for name in self.port_infos:
                         port_info = self.port_infos[name]
                         print ("[%s] rxband: %.4fMB, txband: %.4fMB" % (name, (port_info["rx_band"]/1000000)*8, (port_info["tx_band"]/1000000)*8)) #打印port的频宽信息
-                print(self.net.edges.data())
-                edgels = self.net.edges()
+                #print(self.net.edges.data())
+                edgels = list(self.net.edges())
                 length = len(edgels)
-                print(length)
-                #print(edgels[0])
-                print(type(edgels))
+                edgels.sort()
+               # print(edgels)
                 for l in range(length):
                     #print(edgels[l])
-                    src_dpid = (edgels[l])[0]
-                    dst_dpid = (edgels[l])[1]
+                    src_dpid = edgels[l][0]
+                    dst_dpid = edgels[l][1]
                     print("(link {} -> {} bw: {})".format(src_dpid,dst_dpid,self.net[src_dpid][dst_dpid]["bw"]))
 
 
                 print("------------------------------------------------------------------------------------")
+
