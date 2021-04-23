@@ -253,7 +253,7 @@ class shortest_path(app_manager.RyuApp):
                 #print(self.net.edges.data())
                 edgels = list(self.net.edges())
                 length = len(edgels)
-                edgels.sort()
+                #edgels.sort()
                # 打印拓撲link資訊
                 for l in range(length):
                     #print(edgels[l])
