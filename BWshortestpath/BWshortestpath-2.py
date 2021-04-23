@@ -137,6 +137,7 @@ class shortest_path(app_manager.RyuApp):
         #獲得拓撲信息，初始化圖
         @set_ev_cls(event.EventSwitchEnter)
         def get_topology_data(self, ev):
+                time.sleep(2) # 防止在拓撲完整生成之前就開始偵測
                 switch_list = get_switch(self.topology_api_app, None)
                 switches =[switch.dp.id for switch in switch_list]
                 links_list = get_link(self.topology_api_app, None)
@@ -253,7 +254,7 @@ class shortest_path(app_manager.RyuApp):
                 edgels = list(self.net.edges())
                 length = len(edgels)
                 edgels.sort()
-               # print(edgels)
+               # 打印拓撲link資訊
                 for l in range(length):
                     #print(edgels[l])
                     src_dpid = edgels[l][0]
