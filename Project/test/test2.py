@@ -36,6 +36,26 @@ class shortest_path(app_manager.RyuApp):
                 self.echo_latency = {}
                 self.switch_mod = lookup_service_brick('switches')
                 hub.spawn(self.info_request_loop)
+               #獲得拓撲信息，初始化圖
+        
+        @set_ev_cls(event.EventSwitchEnter)
+        def get_topology_data(self, ev):
+                time.sleep(2)# 等待拓扑建立完成
+                
+                if self.switch_mod is None:
+                    self.switch_mod = lookup_service_brick('switches')
+                switch_list = self.switch_mod.dps.keys()
+
+                #links_list = get_link(self.topology_api_app, None)
+                links_list=[(link.src.dpid,link.dst.dpid,{'port':link.src.port_no,'bw':0,'delay':0, 'lldpdelay':0}) for link in self.switch_mod.links] 
+                self.net.add_nodes_from(switch_list)
+                self.net.add_edges_from(links_list)
+                print(self.net.nodes())
+                
+                for link in self.switch_mod.links:
+                        self.idport_to_id.update({(link.src.dpid,link.src.port_no):link.dst.dpid})
+                print(self.net.nodes())
+                print(self.idport_to_id) 
         
         @set_ev_cls(ofp_event.EventOFPSwitchFeatures, CONFIG_DISPATCHER)
         def switch_features_handler(self, ev):
@@ -68,7 +88,7 @@ class shortest_path(app_manager.RyuApp):
                 if not pkt_ethernet:
                         return
 
-                # 過濾 LLDP packet
+                # 當為LLDP packet時，把lldpdelay資料取出來
                 if pkt_ethernet.ethertype == 35020:
                     try:    
                         src_dpid, src_port_no = LLDPPacket.lldp_parse(msg.data)
@@ -76,7 +96,7 @@ class shortest_path(app_manager.RyuApp):
                         if self.switch_mod is None:
                             self.switch_mod = lookup_service_brick('switches')
 
-                        for port in self.switch_mod.ports.keys():
+                        for port in self.switch_mod.ports.keys(): 
                             if src_dpid == port.dpid and src_port_no == port.port_no:
                                 lldpdelay = self.switch_mod.ports[port].delay
                                 self.net[src_dpid][dst_dpid]["lldpdelay"] = lldpdelay
@@ -154,25 +174,17 @@ class shortest_path(app_manager.RyuApp):
                         return
                    
 
-        #獲得拓撲信息，初始化圖
-        @set_ev_cls(event.EventSwitchEnter)
-        def get_topology_data(self, ev):
-                time.sleep(2)# 等待拓扑建立完成
-                
-                if self.switch_mod is None:
-                    self.switch_mod = lookup_service_brick('switches')
-                switch_list = self.switch_mod.dps.keys()
+        #處理arp廣播风暴，以dpid以及src-mac当作key，value为inport，若傳進来的inport没被記錄，则代表
+        #是会造成廣播风暴的arp封包
+        def mac_learning(self,datapath,src,in_port):
+                self.mac_to_port.setdefault((datapath,datapath.id),{})
 
-                #links_list = get_link(self.topology_api_app, None)
-                links_list=[(link.src.dpid,link.dst.dpid,{'port':link.src.port_no,'bw':0,'delay':0, 'lldpdelay':0}) for link in self.switch_mod.links] 
-                self.net.add_nodes_from(switch_list)
-                self.net.add_edges_from(links_list)
-                print(self.net.nodes())
-                
-                for link in self.switch_mod.links:
-                        self.idport_to_id.update({(link.src.dpid,link.src.port_no):link.dst.dpid})
-                print(self.net.nodes())
-                print(self.idport_to_id)
+                if src in self.mac_to_port[(datapath,datapath.id)]:
+                        if in_port != self.mac_to_port[(datapath,datapath.id)][src]:
+                                return False
+                else:
+                        self.mac_to_port[(datapath,datapath.id)][src] = in_port
+                        return True
 
         def add_flow(self, dp, cookie=0, match=None, inst=[], table=0, priority=10, idle_timeout=10000):
                 ofp = dp.ofproto
@@ -202,20 +214,9 @@ class shortest_path(app_manager.RyuApp):
 
                 dp.send_msg(out)
         
-        #c處理arp廣播风暴，以dpid以及src-mac当作key，value为inport，若傳進来的inport没被記錄，则代表
-        #是会造成廣播风暴的arp封包
-        def mac_learning(self,datapath,src,in_port):
-                self.mac_to_port.setdefault((datapath,datapath.id),{})
-
-                if src in self.mac_to_port[(datapath,datapath.id)]:
-                        if in_port != self.mac_to_port[(datapath,datapath.id)][src]:
-                                return False
-                else:
-                        self.mac_to_port[(datapath,datapath.id)][src] = in_port
-                        return True
 
         def info_request_loop(self):
-                time.sleep(5)
+                time.sleep(5) #等待拓撲建立完成
 
                 while True:
                         switches = topo_api.get_all_switch(self)
@@ -227,10 +228,18 @@ class shortest_path(app_manager.RyuApp):
                                 dp.send_msg(msg)
 
                         time.sleep(1) #每秒獲得信息
+                        #傳送echo_packet用來獲得delay
                         self._send_echo_request()
                         self.create_link_delay()
-                        time.sleep(0.05)
+                        time.sleep(0.05) 
 
+        def _send_echo_request(self):
+            #傳送echo-request給switch
+            for datapath in self.switch_map.values():
+                parser = datapath.ofproto_parser
+                echo_req = parser.OFPEchoRequest(datapath, data=bytearray("%.12f" % time.time(),encoding='utf8'))
+                datapath.send_msg(echo_req)
+                time.sleep(0.1)# 防止過快傳送
         #獲取傳回的link信息
         @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
         def port_stats_event_handler(self, ev):
@@ -271,29 +280,14 @@ class shortest_path(app_manager.RyuApp):
                 self.infos_print()
 
 
-        def _send_echo_request(self):
-            """
-                Seng echo request msg to datapath.
-            """
-            for datapath in self.switch_map.values():
-                parser = datapath.ofproto_parser
-                echo_req = parser.OFPEchoRequest(datapath, data=bytearray("%.12f" % time.time(),encoding='utf8'))
-                datapath.send_msg(echo_req)
-                # Important! Don't send echo request together, Because it will
-                # generate a lot of echo reply almost in the same time.
-                # which will generate a lot of delay of waiting in queue
-                # when processing echo reply in echo_reply_handler.
 
-                time.sleep(0.1)
-    
+                
         @set_ev_cls(ofp_event.EventOFPEchoReply, MAIN_DISPATCHER)
         def echo_reply_handler(self, ev):
-            """
-                Handle the echo reply msg, and get the latency of link.
-            """
+            # 處理echo-reply，獲得latency
             now_timestamp = time.time()
             try:
-                latency = now_timestamp - eval(ev.msg.data)
+                latency = now_timestamp - eval(ev.msg.data) # 將現在的時間減去當時發送的時間，就是latency了
                 self.echo_latency[ev.msg.datapath.id] = latency
             except:
                 return
@@ -305,15 +299,13 @@ class shortest_path(app_manager.RyuApp):
                 src_latency = self.echo_latency[src_dpid]
                 dst_latency = self.echo_latency[dst_dpid]
             
-                delay = (fwd_delay + re_delay - src_latency - dst_latency)/2
+                delay = (fwd_delay + re_delay - src_latency - dst_latency)/2 # 計算出link-delay
                 return max(delay, 0)
             except:
                 return float('inf')
 
         def create_link_delay(self):
-            """
-                Create link delay data, and save it into graph object.
-            """
+             # 獲得link的delay并將其保存在圖里
             for src_dpid in self.net:
                 for dst_dpid in self.net[src_dpid]:
                     if src_dpid == dst_dpid:
@@ -323,7 +315,7 @@ class shortest_path(app_manager.RyuApp):
                     if delay != float('inf'):
                         self.net[src_dpid][dst_dpid]['delay'] = delay
             return
-
+        # 打印網路圖的信息
         def infos_print(self):
             for swport in self.port_infos:
                 port_info = self.port_infos[swport]
