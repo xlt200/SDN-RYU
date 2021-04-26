@@ -213,8 +213,7 @@ class shortest_path(app_manager.RyuApp):
                                 actions=action, data=data)
 
                 dp.send_msg(out)
-        
-
+                
         def info_request_loop(self):
                 time.sleep(5) #等待拓撲建立完成
 
@@ -231,15 +230,18 @@ class shortest_path(app_manager.RyuApp):
                         #傳送echo_packet用來獲得delay
                         self._send_echo_request()
                         self.create_link_delay()
-                        time.sleep(0.05) 
-
-        def _send_echo_request(self):
-            #傳送echo-request給switch
-            for datapath in self.switch_map.values():
-                parser = datapath.ofproto_parser
-                echo_req = parser.OFPEchoRequest(datapath, data=bytearray("%.12f" % time.time(),encoding='utf8'))
-                datapath.send_msg(echo_req)
-                time.sleep(0.1)# 防止過快傳送
+                        time.sleep(0.05)
+        
+        @set_ev_cls(ofp_event.EventOFPEchoReply, MAIN_DISPATCHER)
+        def echo_reply_handler(self, ev):
+            # 處理echo-reply，獲得latency
+            now_timestamp = time.time()
+            try:
+                latency = now_timestamp - eval(ev.msg.data) # 將現在的時間減去當時發送的時間，就是latency了
+                self.echo_latency[ev.msg.datapath.id] = latency
+            except:
+                return
+        
         #獲取傳回的link信息
         @set_ev_cls(ofp_event.EventOFPPortStatsReply, MAIN_DISPATCHER)
         def port_stats_event_handler(self, ev):
@@ -277,20 +279,16 @@ class shortest_path(app_manager.RyuApp):
                                 self.net[dpid][dst_dpid]["bw"] = (BW/1000000)*8
                                 #print("link {} -> {} bw: {}".format(dpid,dst_dpid,self.net[dpid][dst_dpid]["bw"]))
         
-                self.infos_print()
+                self.infos_print() # 打印網路圖信息
+         
 
-
-
-                
-        @set_ev_cls(ofp_event.EventOFPEchoReply, MAIN_DISPATCHER)
-        def echo_reply_handler(self, ev):
-            # 處理echo-reply，獲得latency
-            now_timestamp = time.time()
-            try:
-                latency = now_timestamp - eval(ev.msg.data) # 將現在的時間減去當時發送的時間，就是latency了
-                self.echo_latency[ev.msg.datapath.id] = latency
-            except:
-                return
+        def _send_echo_request(self):
+            #傳送echo-request給switch
+            for datapath in self.switch_map.values():
+                parser = datapath.ofproto_parser
+                echo_req = parser.OFPEchoRequest(datapath, data=bytearray("%.12f" % time.time(),encoding='utf8'))
+                datapath.send_msg(echo_req)
+                time.sleep(0.1)# 防止過快傳送
 
         def get_delay(self, src_dpid, dst_dpid):
             try:
