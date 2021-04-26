@@ -158,23 +158,18 @@ class shortest_path(app_manager.RyuApp):
         @set_ev_cls(event.EventSwitchEnter)
         def get_topology_data(self, ev):
                 time.sleep(2)# 等待拓扑建立完成
-                links2 = []
+                
                 if self.switch_mod is None:
                     self.switch_mod = lookup_service_brick('switches')
                 switch_list = self.switch_mod.dps.keys()
-                #switches = [switch.dp.id for switch in switch_list]
-                for links_list2 in self.switch_mod.links:
-                    links2.append((links_list2.src.dpid,links_list2.dst.dpid))
-                #links2 = [(link2.src,link2.dst) for link2 in links_list2]
 
-                print(links2)
-                print("qqq")
-                links_list = get_link(self.topology_api_app, None)
-                links=[(link.src.dpid,link.dst.dpid,{'port':link.src.port_no,'bw':0,'delay':0, 'lldpdelay':0}) for link in links_list] 
+                #links_list = get_link(self.topology_api_app, None)
+                links_list=[(link.src.dpid,link.dst.dpid,{'port':link.src.port_no,'bw':0,'delay':0, 'lldpdelay':0}) for link in self.switch_mod.links] 
                 self.net.add_nodes_from(switch_list)
-                self.net.add_edges_from(links)
+                self.net.add_edges_from(links_list)
                 print(self.net.nodes())
-                for link in links_list:
+                
+                for link in self.switch_mod.links:
                         self.idport_to_id.update({(link.src.dpid,link.src.port_no):link.dst.dpid})
                 print(self.net.nodes())
                 print(self.idport_to_id)
